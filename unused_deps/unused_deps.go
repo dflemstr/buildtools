@@ -27,6 +27,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 
 	"github.com/bazelbuild/buildtools/build"
@@ -38,12 +39,13 @@ import (
 )
 
 var (
-	buildTool = flag.String("build_tool", config.DefaultBuildTool, config.BuildToolHelp)
+	buildTool           = flag.String("build_tool", config.DefaultBuildTool, config.BuildToolHelp)
 	extraActionFileName = flag.String("extra_action_file", "", config.ExtraActionFileNameHelp)
-	outputFileName = flag.String("output_file", "", "used only with extra_action_file")
-	buildOptions = stringList("extra_build_flags", "Extra build flags to use when building the targets.")
+	outputFileName      = flag.String("output_file", "", "used only with extra_action_file")
+	buildOptions        = stringList("extra_build_flags", "Extra build flags to use when building the targets.")
 
-	blazeFlags = []string{"--tool_tag=unused_deps", "--keep_going", "--color=yes", "--curses=yes"}
+	blazeFlags         = []string{"--tool_tag=unused_deps", "--keep_going", "--color=yes", "--curses=yes"}
+	workspaceForbidden = regexp.MustCompile("[^0-9a-zA-Z_]")
 )
 
 func stringList(name, help string) func() []string {
@@ -214,13 +216,13 @@ func hasRuntimeComment(expr build.Expr) bool {
 // printCommands prints, for each key in the deps map, a buildozer command
 // to remove that entry from the deps attribute of the rule identified by label.
 // Returns true if at least one command was printed, or false otherwise.
-func printCommands(buildTool, label string, deps map[string]bool) (anyCommandPrinted bool) {
+func printCommands(label string, deps map[string]bool) (anyCommandPrinted bool) {
 	buildFileName, pkg, ruleName := edit.InterpretLabel(label)
 	depsExpr := getDepsExpr(buildFileName, ruleName)
 	for _, li := range edit.AllLists(depsExpr) {
 		for _, elem := range li.List {
 			str, ok := elem.(*build.StringExpr)
-			if ok && isRedundantDependency(buildTool, str.Value, pkg, deps) {
+			if ok && isRedundantDependency(str.Value, pkg, deps) {
 				if hasRuntimeComment(str) {
 					fmt.Printf("buildozer 'move deps runtime_deps %s' %s\n", str.Value, label)
 				} else {
@@ -233,32 +235,27 @@ func printCommands(buildTool, label string, deps map[string]bool) (anyCommandPri
 	return anyCommandPrinted
 }
 
-func isRedundantDependency(buildTool, depToRemove, pkg string, deps map[string]bool) bool {
+func isRedundantDependency(depToRemove, pkg string, deps map[string]bool) bool {
 	if strings.HasPrefix(depToRemove, "//3rdparty/jvm/") {
-		query := fmt.Sprintf("kind(\"java_import rule\", deps(%s, 3))", depToRemove)
-		out, err := exec.Command(buildTool, "query", query).Output()
+		groupId, artifactId := edit.ParseLabel(depToRemove)
+		groupId = strings.TrimPrefix(groupId, "3rdparty/jvm/")
 
-		if err != nil {
-			log.Fatal(err)
-		}
+		thirdPartyDep := groupId + "__" + artifactId
+		thirdPartyDep = workspaceForbidden.ReplaceAllString(thirdPartyDep, "_")
+		thirdPartyDep = "@@" + thirdPartyDep + "//jar:jar"
 
-		actualDeps := strings.Split(strings.TrimSpace(bytes.NewBuffer(out).String()), "\n")
-
-		for tmpDep := range deps {
-			dep := strings.Replace(tmpDep, "@@", "@", -1)
-			for _, actualDep := range actualDeps {
-				if !strings.HasPrefix(actualDep, "@bazel_tools") {
-					if edit.LabelsEqual(actualDep, dep, pkg) {
-						return true
-					}
-				}
-			}
-		}
-	} else {
+		log.Println(thirdPartyDep)
 		for dep := range deps {
-			if edit.LabelsEqual(depToRemove, dep, pkg) {
+			log.Println(dep)
+			if edit.LabelsEqual(thirdPartyDep, dep, pkg) {
 				return true
 			}
+		}
+	}
+
+	for dep := range deps {
+		if edit.LabelsEqual(depToRemove, dep, pkg) {
+			return true
 		}
 	}
 	return false
@@ -316,7 +313,7 @@ func main() {
 		depsByJar := directDepParams(inputFileName(blazeBin, pkg, ruleName, "jar-2.params"))
 		depsToRemove := unusedDeps(inputFileName(blazeBin, pkg, ruleName, "jdeps"), depsByJar)
 		// TODO(bazel-team): instead of printing, have buildifier-like modes?
-		anyCommandPrinted = printCommands(*buildTool, label, depsToRemove) || anyCommandPrinted
+		anyCommandPrinted = printCommands(label, depsToRemove) || anyCommandPrinted
 	}
 	if !anyCommandPrinted {
 		fmt.Fprintln(os.Stderr, "No unused deps found.")
