@@ -244,9 +244,7 @@ func isRedundantDependency(depToRemove, pkg string, deps map[string]bool) bool {
 		thirdPartyDep = workspaceForbidden.ReplaceAllString(thirdPartyDep, "_")
 		thirdPartyDep = "@@" + thirdPartyDep + "//jar:jar"
 
-		log.Println(thirdPartyDep)
 		for dep := range deps {
-			log.Println(dep)
 			if edit.LabelsEqual(thirdPartyDep, dep, pkg) {
 				return true
 			}
