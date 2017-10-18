@@ -283,7 +283,7 @@ func main() {
 
 	queryCmd := append([]string{"query"}, blazeFlags...)
 	queryCmd = append(
-		queryCmd, fmt.Sprintf("kind('(java|android)_*', %s)", strings.Join(targetPatterns, " + ")))
+		queryCmd, fmt.Sprintf("kind('(java|android|scala)_*', %s)", strings.Join(targetPatterns, " + ")))
 
 	log.Printf("running: %s %s", *buildTool, strings.Join(queryCmd, " "))
 	queryOut, err := cmdWithStderr(*buildTool, queryCmd...).Output()
@@ -291,7 +291,7 @@ func main() {
 		log.Print(err)
 	}
 	if len(queryOut) == 0 {
-		fmt.Fprintln(os.Stderr, "found no targets of kind (java|android)_*")
+		fmt.Fprintln(os.Stderr, "found no targets of kind (java|android|scala)_*")
 		usage()
 	}
 
